@@ -1,0 +1,18 @@
+name: Unzip project
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  unzip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          unzip -q *.zip
+          cp -a Mark-LVII-main/. .
+          rm -rf Mark-LVII-main *.zip
+          git config user.name "Dilawar"
+          git config user.email "dilawarasjad174@gmail.com"
+          git add -A
+          git commit -m "Add project"
+          git push
