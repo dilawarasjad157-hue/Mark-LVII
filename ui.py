@@ -105,6 +105,11 @@ class JarvisUI:
         self._win = MainWindow(face_path)
         self.root = _RootShim(self._app)
         self._win.show()
+        try:
+            from gui.boot_intro import play_intro
+            self._intro = play_intro(self._win)
+        except Exception:
+            self._intro = None
 
     @property
     def muted(self) -> bool:

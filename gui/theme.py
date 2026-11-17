@@ -96,28 +96,42 @@ _RIGHT_W = 340
 _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
 
 
+# The cyan palette this app shipped with. Kept whole: it is what a custom accent
+# colour is derived from (see apply_ui_accent), so the accent picker still works.
+_CYAN_PALETTE: dict[str, str] = {
+    "BG": "#00060a", "PANEL": "#010d14", "PANEL2": "#010f18",
+    "BORDER": "#0d3347", "BORDER_B": "#1a5c7a", "BORDER_A": "#0f4060",
+    "PRI": "#00d4ff", "PRI_DIM": "#0a8aab", "PRI_GHO": "#001f2e",
+    "TEXT": "#8ffcff", "TEXT_DIM": "#3a8a9a", "TEXT_MED": "#5ab8cc",
+    "WHITE": "#d8f8ff", "DARK": "#000d14", "BAR_BG": "#011520",
+}
+_CYAN_ACC = "#ff6b00"
+
+
 class C:
-    BG        = "#00060a"
-    PANEL     = "#010d14"
-    PANEL2    = "#010f18"
-    BORDER    = "#0d3347"
-    BORDER_B  = "#1a5c7a"
-    BORDER_A  = "#0f4060"
-    PRI       = "#00d4ff"
-    PRI_DIM   = "#007a99"
-    PRI_GHO   = "#001f2e"
-    ACC       = "#ff6b00"
+    """The default look: black glass, white-grey linework, a cold teal accent —
+    after the monochrome half of the opening sequence (assets/boot_intro.mp4)."""
+    BG        = "#000000"
+    PANEL     = "#07090a"
+    PANEL2    = "#0c0f11"
+    BORDER    = "#2b3034"
+    BORDER_B  = "#6b737a"
+    BORDER_A  = "#41484d"
+    PRI       = "#e8eef2"
+    PRI_DIM   = "#9aa4ab"
+    PRI_GHO   = "#12161a"
+    ACC       = "#4fd0e6"
     ACC2      = "#ffcc00"
     GREEN     = "#00ff88"
     GREEN_D   = "#00aa55"
     RED       = "#ff3355"
     MUTED_C   = "#ff3366"
-    TEXT      = "#8ffcff"
-    TEXT_DIM  = "#3a8a9a"
-    TEXT_MED  = "#5ab8cc"
-    WHITE     = "#d8f8ff"
-    DARK      = "#000d14"
-    BAR_BG    = "#011520"
+    TEXT      = "#d3dbe0"
+    TEXT_DIM  = "#737c83"
+    TEXT_MED  = "#a3adb4"
+    WHITE     = "#ffffff"
+    DARK      = "#000000"
+    BAR_BG    = "#0d1114"
 
 
 # Keys tied to the accent colour — status colours (ACC, GREEN, RED…) stay fixed
@@ -129,6 +143,7 @@ _HUE_LINKED = (
 _PALETTE_DEFAULTS: dict[str, str] = {k: getattr(C, k) for k in _HUE_LINKED}
 
 DEFAULT_UI_COLOR = _PALETTE_DEFAULTS["PRI"]
+_FILM_ACC = C.ACC
 
 
 def apply_ui_accent(accent_hex: str) -> bool:
@@ -154,12 +169,23 @@ def apply_ui_accent(accent_hex: str) -> bool:
         b = int(h[5:7], 16) / 255
         return colorsys.rgb_to_hsv(r, g, b)
 
-    base_h            = _hsv(_PALETTE_DEFAULTS["PRI"])[0]
+    # The default accent is the film look itself: restore it as written. The
+    # cyan every earlier Mark saved as its default counts as the default too —
+    # otherwise an old config would keep the old blue interface.
+    if accent_hex in (DEFAULT_UI_COLOR, "#00d4ff"):
+        for key, hex0 in _PALETTE_DEFAULTS.items():
+            setattr(C, key, hex0)
+        C.ACC = _FILM_ACC
+        return True
+
+    # Anything else is a hue shift of the cyan palette, as it always was.
+    C.ACC = _CYAN_ACC
+    base_h            = _hsv(_CYAN_PALETTE["PRI"])[0]
     acc_h, acc_s, _av = _hsv(accent_hex)
     dh   = acc_h - base_h
     grey = acc_s < 0.08   # near-grey accent → the whole theme is desaturated
 
-    for key, hex0 in _PALETTE_DEFAULTS.items():
+    for key, hex0 in _CYAN_PALETTE.items():
         h, s, v = _hsv(hex0)
         if grey:
             s *= 0.15

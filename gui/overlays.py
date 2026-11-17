@@ -92,7 +92,7 @@ class SetupOverlay(QWidget):
         self._key_input.setFixedHeight(32)
         self._key_input.setStyleSheet(f"""
             QLineEdit {{
-                background: #000d12; color: {C.TEXT};
+                background: #07090a; color: {C.TEXT};
                 border: 1px solid {C.BORDER}; border-radius: 3px; padding: 4px 8px;
             }}
             QLineEdit:focus {{ border: 1px solid {C.PRI}; }}
@@ -158,7 +158,7 @@ class SetupOverlay(QWidget):
 
     def _sel(self, key: str):
         self._sel_os = key
-        pal = {"windows":(C.PRI,"#001a22"),"mac":(C.ACC2,"#1a1400"),"linux":(C.GREEN,"#001a0d")}
+        pal = {"windows":(C.PRI,"#12161a"),"mac":(C.ACC2,"#1a1400"),"linux":(C.GREEN,"#001a0d")}
         for k, btn in self._os_btns.items():
             if k == key:
                 fg, bg = pal[k]
@@ -171,7 +171,7 @@ class SetupOverlay(QWidget):
             else:
                 btn.setStyleSheet(f"""
                     QPushButton {{
-                        background: #000d12; color: {C.TEXT_DIM};
+                        background: #07090a; color: {C.TEXT_DIM};
                         border: 1px solid {C.BORDER}; border-radius: 3px;
                     }}
                     QPushButton:hover {{ color: {C.TEXT}; border: 1px solid {C.BORDER_B}; }}
@@ -258,7 +258,7 @@ class HueWheel(QWidget):
         ang = self._hue * 2 * math.pi
         hx  = center.x() + r * math.cos(ang)
         hy  = center.y() - r * math.sin(ang)
-        p.setPen(QPen(QColor("#00060a"), 2))
+        p.setPen(QPen(QColor("#000000"), 2))
         p.setBrush(QBrush(QColor("#ffffff")))
         p.drawEllipse(QPointF(hx, hy), 7.5, 7.5)
         p.end()
@@ -310,11 +310,11 @@ class CustomizeOverlay(QWidget):
             w.setStyleSheet(f"color: {color}; background: transparent;")
             return w
 
-        _fs = (f"QLineEdit {{ background: #000d12; color: {C.TEXT}; "
+        _fs = (f"QLineEdit {{ background: #07090a; color: {C.TEXT}; "
                f"border: 1px solid {C.BORDER}; border-radius: 3px; padding: 4px 8px; }}"
                f"QLineEdit:focus {{ border: 1px solid {C.PRI}; }}")
 
-        lay.addWidget(_lbl("⚙  CUSTOMISE ASSISTANT", 12, True))
+        lay.addWidget(_lbl("CUSTOMISE ASSISTANT", 12, True))
         sep = QFrame(); sep.setFrameShape(QFrame.Shape.HLine)
         sep.setStyleSheet(f"color: {C.BORDER}; margin: 2px 0;")
         lay.addWidget(sep)
@@ -394,7 +394,7 @@ class CustomizeOverlay(QWidget):
         self._wheel.hue_committed.connect(self._on_wheel_commit)
 
         self._hex_input = QLineEdit(self._sel_color)
-        self._hex_input.setPlaceholderText("#00d4ff   (custom hex colour)")
+        self._hex_input.setPlaceholderText("#e8eef2   (custom hex colour)")
         self._hex_input.setFont(hud_font(10))
         self._hex_input.setFixedHeight(28)
         self._hex_input.setStyleSheet(_fs)
@@ -521,7 +521,7 @@ class PluginManagerOverlay(QWidget):
         lay.setContentsMargins(20, 16, 20, 16)
         lay.setSpacing(6)
 
-        hdr = QLabel("🧩  PLUGIN MANAGER")
+        hdr = QLabel("PLUGIN MANAGER")
         hdr.setFont(hud_font(12, QFont.Weight.Bold))
         hdr.setStyleSheet(f"color: {C.PRI}; background: transparent;")
         lay.addWidget(hdr)
@@ -760,7 +760,7 @@ class AudioDeviceOverlay(_HudOverlay):
         lay.setContentsMargins(20, 16, 20, 16)
         lay.setSpacing(6)
 
-        hdr = QLabel("🎧  AUDIO DEVICES")
+        hdr = QLabel("AUDIO DEVICES")
         hdr.setFont(hud_font(12, QFont.Weight.Bold))
         hdr.setStyleSheet(f"color: {C.PRI}; background: transparent;")
         lay.addWidget(hdr)
@@ -770,10 +770,10 @@ class AudioDeviceOverlay(_HudOverlay):
         lay.addWidget(sep)
 
         _combo_css = (
-            f"QComboBox {{ background: #000d12; color: {C.TEXT}; "
+            f"QComboBox {{ background: #07090a; color: {C.TEXT}; "
             f"border: 1px solid {C.BORDER}; border-radius: 3px; padding: 4px 8px; }}"
             f"QComboBox:hover {{ border-color: {C.BORDER_B}; }}"
-            f"QComboBox QAbstractItemView {{ background: #000d12; color: {C.TEXT}; "
+            f"QComboBox QAbstractItemView {{ background: #07090a; color: {C.TEXT}; "
             f"selection-background-color: {C.PRI_GHO}; border: 1px solid {C.BORDER}; }}"
         )
 
@@ -840,7 +840,7 @@ class AudioDeviceOverlay(_HudOverlay):
             meter.setTextVisible(False)
             meter.setFixedHeight(6)
             meter.setStyleSheet(
-                f"QProgressBar {{ background: #000d12; border: 1px solid {C.BORDER}; "
+                f"QProgressBar {{ background: #07090a; border: 1px solid {C.BORDER}; "
                 f"border-radius: 3px; }}"
                 f"QProgressBar::chunk {{ background: {C.PRI}; border-radius: 2px; }}")
             meter.hide()
@@ -900,7 +900,7 @@ class AudioDeviceOverlay(_HudOverlay):
             self._vol.setValue(int(_vol_now))
             self._vol.setFixedHeight(22)
             self._vol.setStyleSheet(
-                f"QSlider::groove:horizontal {{ background: #000d12; height: 4px; "
+                f"QSlider::groove:horizontal {{ background: #07090a; height: 4px; "
                 f"border: 1px solid {C.BORDER}; border-radius: 2px; }}"
                 f"QSlider::sub-page:horizontal {{ background: {C.PRI_DIM}; "
                 f"border-radius: 2px; }}"
@@ -1168,7 +1168,7 @@ class MemoryOverlay(_HudOverlay):
 
         from memory.memory_manager import all_entries_for_ui
 
-        hdr = QLabel("🧠  WHAT JARVIS REMEMBERS")
+        hdr = QLabel("WHAT JARVIS REMEMBERS")
         hdr.setFont(hud_font(12, QFont.Weight.Bold))
         hdr.setStyleSheet(f"color: {C.PRI}; background: transparent;")
         self._lay.addWidget(hdr)
@@ -1414,7 +1414,7 @@ class PluginSettingsOverlay(QWidget):
         self._status_labels: dict[str, QLabel] = {} # namespace -> status QLabel
         self._test_done.connect(self._on_test_done)
 
-        self._fs = (f"QLineEdit {{ background: #000d12; color: {C.TEXT}; "
+        self._fs = (f"QLineEdit {{ background: #07090a; color: {C.TEXT}; "
                     f"border: 1px solid {C.BORDER}; border-radius: 3px; padding: 4px 8px; }}"
                     f"QLineEdit:focus {{ border: 1px solid {C.PRI}; }}")
 
@@ -1422,7 +1422,7 @@ class PluginSettingsOverlay(QWidget):
         root.setContentsMargins(22, 16, 22, 16)
         root.setSpacing(8)
 
-        root.addWidget(self._lbl("⚙  PLUGIN SETTINGS", 12, True))
+        root.addWidget(self._lbl("PLUGIN SETTINGS", 12, True))
         sep = QFrame(); sep.setFrameShape(QFrame.Shape.HLine)
         sep.setStyleSheet(f"color: {C.BORDER}; margin: 2px 0;")
         root.addWidget(sep)
@@ -1511,9 +1511,9 @@ class PluginSettingsOverlay(QWidget):
                 w.setFont(hud_font(9))
                 w.setFixedHeight(30)
                 w.setStyleSheet(
-                    f"QComboBox {{ background: #000d12; color: {C.TEXT}; "
+                    f"QComboBox {{ background: #07090a; color: {C.TEXT}; "
                     f"border: 1px solid {C.BORDER}; border-radius: 3px; padding: 2px 8px; }}"
-                    f"QComboBox QAbstractItemView {{ background: #000d12; color: {C.TEXT}; "
+                    f"QComboBox QAbstractItemView {{ background: #07090a; color: {C.TEXT}; "
                     f"selection-background-color: {C.PRI_GHO}; }}")
                 if stored is not None:
                     w.setCurrentText(str(stored))
@@ -1549,7 +1549,7 @@ class PluginSettingsOverlay(QWidget):
             ab.setFont(hud_font(8, QFont.Weight.Bold))
             ab.setCursor(Qt.CursorShape.PointingHandCursor)
             ab.setStyleSheet(f"""
-                QPushButton {{ background: #00091a; color: {C.PRI};
+                QPushButton {{ background: #12161a; color: {C.PRI};
                     border: 1px solid {C.PRI_DIM}; border-radius: 3px; }}
                 QPushButton:hover {{ background: {C.PRI_GHO}; border-color: {C.PRI}; }}
             """)

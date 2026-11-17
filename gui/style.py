@@ -19,7 +19,7 @@ from __future__ import annotations
 from PyQt6.QtCore import QPointF, QRectF
 from PyQt6.QtGui import QColor, QFont, QPolygonF
 
-from gui.theme import C
+from gui.theme import C, _FILM_ACC
 
 DISPLAY_FAMILIES = ["Bahnschrift", "Segoe UI", "SF Pro Display", "Helvetica Neue",
                     "Noto Sans", "DejaVu Sans"]
@@ -74,6 +74,12 @@ def px_font(px: float, weight=QFont.Weight.Normal, mono: bool = False,
     return f
 
 
+def tint() -> str:
+    """The colour of the soft light behind the rings: the opening sequence's
+    cold teal in the default look, the chosen accent when a custom one is set."""
+    return C.ACC if str(C.ACC).lower() == str(_FILM_ACC).lower() else C.PRI
+
+
 def blend(col, a: float, base=None) -> QColor:
     """`col` mixed onto the background (or `base`) by `a` — opaque, so it is
     drawn on the raster engine's fast path."""
@@ -111,12 +117,14 @@ def btn_css(kind: str = "dim", align: str = "left") -> str:
     kind: "primary" (the main action), "dim" (ordinary), "on" / "off" (a switch),
     "choice" (one of two equal options — neither reads as disabled)."""
     pad = "padding: 0 10px;" if align == "left" else "padding: 0 6px;"
-    base = f"text-align: {align}; {pad} border-radius: 0px;"
+    base = f"text-align: {align}; {pad} border-radius: 3px;"
     if kind == "primary":
         return f"""
             QPushButton {{ background: {C.PRI_GHO}; color: {C.PRI};
                 border: 1px solid {C.PRI_DIM}; border-left: 3px solid {C.PRI}; {base} }}
-            QPushButton:hover {{ border-color: {C.PRI}; color: {C.WHITE}; }}
+            QPushButton:hover {{ border-color: {C.PRI}; color: {C.WHITE}; background: {C.PANEL2}; }}
+            QPushButton:pressed {{ background: {C.DARK}; color: {C.PRI}; }}
+            QPushButton:focus {{ border-color: {C.PRI}; }}
             QPushButton:disabled {{ color: {C.TEXT_DIM}; border-color: {C.BORDER}; }}"""
     if kind == "on":
         return f"""
@@ -134,14 +142,15 @@ def btn_css(kind: str = "dim", align: str = "left") -> str:
         QPushButton {{ background: {C.PANEL}; color: {C.TEXT_MED if kind == 'dim' else C.TEXT_DIM};
             border: 1px solid {C.BORDER}; border-left: 3px solid {C.BORDER_A}; {base} }}
         QPushButton:hover {{ color: {C.PRI}; border-color: {C.BORDER_B};
-            border-left: 3px solid {C.PRI_DIM}; }}
+            border-left: 3px solid {C.PRI_DIM}; background: {C.PANEL2}; }}
+        QPushButton:pressed {{ background: {C.PRI_GHO}; }}
         QPushButton:disabled {{ color: {C.TEXT_DIM}; border-color: {C.BORDER}; }}"""
 
 
 def scroll_css() -> str:
     return f"""
-        QScrollBar:vertical {{ background: transparent; width: 6px; border: none; margin: 2px 0; }}
-        QScrollBar::handle:vertical {{ background: {C.BORDER_B}; min-height: 20px; }}
+        QScrollBar:vertical {{ background: transparent; width: 7px; border: none; margin: 2px 1px; }}
+        QScrollBar::handle:vertical {{ background: {C.BORDER_B}; min-height: 24px; border-radius: 3px; }}
         QScrollBar::handle:vertical:hover {{ background: {C.PRI_DIM}; }}
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; border: none; }}
         QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}

@@ -1394,7 +1394,7 @@ class JarvisLive:
         time_ctx = (
             f"[CURRENT DATE & TIME]\n"
             f"Right now it is: {time_str}\n"
-            f"Use this to calculate exact times for reminders.\n\n"
+            f"This is the real date. Use it for exact reminder times, and treat anything you \"know\" about current events as outdated — call web_search for it.\n\n"
         )
 
         # Identity injection — overrides any hardcoded name in prompt.txt

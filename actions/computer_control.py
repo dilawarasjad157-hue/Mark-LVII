@@ -173,18 +173,98 @@ def _user_profile() -> dict:
         pass
     return {}
 
-def _type(text: str, interval: float = 0.03) -> str:
+# ── The accurate engine ───────────────────────────────────────────────────────
+# core/screenact.py clicks an ELEMENT it read from the accessibility tree, types
+# characters rather than key presses (so "@" and non-Latin text survive any
+# keyboard layout), normalises key names, refuses to click the assistant's own
+# window and reports the mouse-corner failsafe honestly. This file used to talk
+# to pyautogui directly and ask a model to guess pixels; it now goes through the
+# engine first and keeps the old route only as a fallback when the engine cannot
+# load, so nothing that worked before stops working.
+
+def _engine():
+    """core.screenact when it is importable and this session may drive input."""
+    try:
+        from core import screenact
+        ok, _why = screenact.available()
+        return screenact if ok else None
+    except Exception as e:                       # noqa: BLE001
+        print(f"[ComputerControl] screenact unavailable ({e}) - using pyautogui")
+        return None
+
+
+_KEY_FIXES = {
+    "windows": "win", "window": "win", "super": "win", "start": "win",
+    "control": "ctrl", "return": "enter", "escape": "esc", "del": "delete",
+    "spacebar": "space", "page up": "pageup", "page down": "pagedown",
+    "caps lock": "capslock", "print screen": "printscreen", "prtsc": "printscreen",
+    "backspace ": "backspace", "arrow up": "up", "arrow down": "down",
+    "arrow left": "left", "arrow right": "right",
+}
+
+
+def _fix_key(k: str) -> str:
+    k = str(k or "").strip().lower()
+    return _KEY_FIXES.get(k, k)
+
+
+def _act_result(act, ok_text: str) -> str:
+    """Turn a screenact.Act into the done / failed line the model reads."""
+    if getattr(act, "ok", False):
+        extra = f" ({'; '.join(act.warnings)})" if getattr(act, "warnings", None) else ""
+        return f"{ok_text}{extra}"
+    return outcome.failed("computer_control", getattr(act, "error", "") or "the input was not delivered",
+                          step=getattr(act, "action", ""))
+
+
+def _failsafe_retry(fn, *a, **kw):
+    """Run a pyautogui call; if the mouse sits in a screen corner (the
+    failsafe), park it in the middle and try exactly once more."""
+    try:
+        return fn(*a, **kw)
+    except Exception as e:                       # noqa: BLE001
+        if type(e).__name__ != "FailSafeException":
+            raise
+        w, h = pyautogui.size()
+        pyautogui.FAILSAFE = False
+        try:
+            pyautogui.moveTo(w // 2, h // 2)
+        finally:
+            pyautogui.FAILSAFE = True
+        return fn(*a, **kw)
+
+
+def _type(text: str, interval: float = 0.03, enter: bool = False) -> str:
+    shown = f"{text[:60]}{'…' if len(text) > 60 else ''}"
+    eng = _engine()
+    if eng is not None:
+        time.sleep(0.2)
+        act = eng.type_text(text)
+        if not act.ok:
+            return _act_result(act, "")
+        if enter:
+            time.sleep(0.15)
+            eng.press("enter")
+        return f"Typed: {shown}" + (" + Enter" if enter else "")
     _require_pyautogui()
     time.sleep(0.3)
-    pyautogui.typewrite(text, interval=interval)
-    return f"Typed: {text[:60]}{'…' if len(text) > 60 else ''}"
+    if text.isascii():
+        _failsafe_retry(pyautogui.typewrite, text, interval=interval)
+    else:                                        # typewrite drops non-ASCII silently
+        _clipboard_paste(text)
+    if enter:
+        pyautogui.press("enter")
+    return f"Typed: {shown}"
 
 
-def _smart_type(text: str, clear_first: bool = True) -> str:
+def _smart_type(text: str, clear_first: bool = True, enter: bool = False) -> str:
     _require_pyautogui()
     if clear_first:
         _clear_field()
         time.sleep(0.1)
+
+    if _engine() is not None:
+        return _type(text, enter=enter)
 
     if len(text) > 20 and _require_pyperclip():
         pyperclip.copy(text)
@@ -200,21 +280,41 @@ def _smart_type(text: str, clear_first: bool = True) -> str:
 def _click(x=None, y=None, button: str = "left", clicks: int = 1) -> str:
     _require_pyautogui()
     if x is not None and y is not None:
-        pyautogui.click(x, y, button=button, clicks=clicks)
+        x, y = int(x), int(y)
+        eng = _engine()
+        if eng is not None:
+            act = eng.click(eng.Point(x, y, origin="vision"), button=button, clicks=clicks)
+            return _act_result(act, f"{'Double-c' if clicks == 2 else 'C'}licked ({x}, {y}) [{button}]")
+        w, h = pyautogui.size()
+        x, y = max(1, min(w - 2, x)), max(1, min(h - 2, y))      # never a corner
+        _failsafe_retry(pyautogui.moveTo, x, y, duration=0.15)
+        time.sleep(0.05)
+        _failsafe_retry(pyautogui.click, button=button, clicks=clicks)
         return f"{'Double-c' if clicks == 2 else 'C'}licked ({x}, {y}) [{button}]"
-    pyautogui.click(button=button, clicks=clicks)
+    _failsafe_retry(pyautogui.click, button=button, clicks=clicks)
     return f"Clicked at current position [{button}]"
 
 
 def _hotkey(*keys) -> str:
     _require_pyautogui()
-    pyautogui.hotkey(*keys)
+    keys = [_fix_key(k) for k in keys if str(k).strip()]
+    if not keys:
+        return outcome.failed("computer_control", "no keys were given")
+    eng = _engine()
+    if eng is not None:
+        return _act_result(eng.press("+".join(keys)), f"Hotkey: {'+'.join(keys)}")
+    _failsafe_retry(pyautogui.hotkey, *keys)
     return f"Hotkey: {'+'.join(keys)}"
 
 
-def _press(key: str) -> str:
+def _press(key: str, presses: int = 1) -> str:
     _require_pyautogui()
-    pyautogui.press(key)
+    key = _fix_key(key)
+    eng = _engine()
+    if eng is not None:
+        return _act_result(eng.press(key, presses=presses), f"Pressed: {key}")
+    for _ in range(max(1, int(presses))):
+        _failsafe_retry(pyautogui.press, key)
     return f"Pressed: {key}"
 
 
@@ -460,50 +560,140 @@ def _close_app(app_name: str, confirmed_index: int | None = None) -> str:
     )
 
 
-def _screen_find(description: str) -> tuple[int, int] | None:
-    api_key = _get_api_key()
-    if not api_key:
-        print("[ComputerControl] ⚠️ No API key for screen_find")
+def _parse_point(text: str, size: tuple[int, int]) -> tuple[int, int] | None:
+    """Centre of the element in the reply, as pixels of an image `size` wide.
+
+    Gemini is trained to point in a 0-1000 grid ([y, x] or box_2d
+    [ymin, xmin, ymax, xmax]), NOT in screen pixels - asking it for pixels is
+    what made clicks land a few dozen pixels off, sometimes on the wrong thing.
+    So it is asked in its own units and converted here.
+    """
+    if not text or "NOT_FOUND" in text.upper():
+        return None
+    w, h = size
+    text = re.sub(r'"[A-Za-z_0-9 ]+"\s*:', " ", text)       # drop keys such as "box_2d"
+    nums = [float(n) for n in re.findall(r"-?\d+(?:\.\d+)?", text)]
+    if len(nums) >= 4:                      # box_2d: ymin, xmin, ymax, xmax
+        ymin, xmin, ymax, xmax = nums[:4]
+        y, x = (ymin + ymax) / 2, (xmin + xmax) / 2
+    elif len(nums) >= 2:                    # point: y, x
+        y, x = nums[0], nums[1]
+    else:
+        return None
+    if not (0 <= x <= 1000 and 0 <= y <= 1000):
+        return None
+    return int(round(x / 1000 * w)), int(round(y / 1000 * h))
+
+
+def _ask_point(img, description: str):
+    """One vision question about `img`. Returns (x, y) in img pixels or None."""
+    from google.genai import types as gtypes
+    from core import gemini
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    prompt = (
+        f"Find this UI element on the screenshot: '{description}'.\n"
+        "Reply with ONLY a JSON object {\"box_2d\": [ymin, xmin, ymax, xmax]} "
+        "using coordinates normalised to a 0-1000 grid over the whole image "
+        "(0,0 = top-left, 1000,1000 = bottom-right). The box must tightly "
+        "surround the element itself. If it is not visible, reply NOT_FOUND."
+    )
+    response = gemini.call(
+        [gtypes.Part.from_bytes(data=buf.getvalue(), mime_type="image/png"), prompt],
+        tier=gemini.FAST, timeout_ms=20_000,
+    )
+    if response is None:
+        return None
+    return _parse_point((response.text or "").strip(), img.size)
+
+
+def _vision_find(description: str) -> tuple[int, int] | None:
+    """Locate by sight, in two passes: a coarse look at the whole screen, then a
+    zoomed look at the crop around the first answer. The second pass is what
+    turns "roughly there" into "on the button"."""
+    try:
+        _require_pyautogui()
+        sw, sh = pyautogui.size()
+        img = pyautogui.screenshot()
+        first = _ask_point(img, description)
+        if first is None:
+            return None
+        # image pixels -> screen coordinates (differ on scaled displays)
+        kx, ky = sw / img.width, sh / img.height
+
+        cw, ch = min(img.width, 640), min(img.height, 400)
+        left = max(0, min(img.width - cw, first[0] - cw // 2))
+        top = max(0, min(img.height - ch, first[1] - ch // 2))
+        crop = img.crop((left, top, left + cw, top + ch)).resize((cw * 2, ch * 2))
+        refined = _ask_point(crop, description)
+        if refined is not None:
+            fx = left + refined[0] / 2
+            fy = top + refined[1] / 2
+            # trust the zoomed answer unless it wandered far from the first one
+            if abs(fx - first[0]) < cw * 0.6 and abs(fy - first[1]) < ch * 0.6:
+                first = (int(fx), int(fy))
+        return int(first[0] * kx), int(first[1] * ky)
+    except Exception as e:                       # noqa: BLE001
+        print(f"[ComputerControl] ⚠️ vision find failed: {e}")
         return None
 
+
+def _tree_find(description: str):
+    """The exact control, from the accessibility tree, or None."""
     try:
-        from google import genai
-        from google.genai import types as gtypes
+        from core import screenview
+        view = screenview.look()
+        hits = view.find(description, interactable_only=True, limit=3)
+        if not hits:
+            hits = view.find(description, limit=3)
+        return hits[0] if hits else None
+    except Exception as e:                       # noqa: BLE001
+        print(f"[ComputerControl] tree find unavailable: {e}")
+        return None
 
-        _require_pyautogui()
-        w, h  = pyautogui.size()
-        img   = pyautogui.screenshot()
-        buf   = io.BytesIO()
-        img.save(buf, format="PNG")
-        image_bytes = buf.getvalue()
 
-        prompt = (
-            f"This is a screenshot of a {w}×{h} pixel screen. "
-            f"Locate the UI element described as: '{description}'. "
-            f"Reply with ONLY the center coordinates as: x,y "
-            f"If the element is not visible, reply: NOT_FOUND"
-        )
+def _screen_find(description: str) -> tuple[int, int] | None:
+    """(x, y) of the thing described: accessibility tree first, sight second."""
+    el = _tree_find(description)
+    if el is not None:
+        return el.center
+    return _vision_find(description)
 
-        from core import gemini
-        response = gemini.call(
-            [gtypes.Part.from_bytes(data=image_bytes, mime_type="image/png"), prompt],
-            tier=gemini.FAST, timeout_ms=20_000,
-        )
-        if response is None:
-            return None
 
-        text = (response.text or "").strip()
-        if "NOT_FOUND" in text.upper():
-            return None
+def _screen_click(description: str, button: str = "left", clicks: int = 1) -> str:
+    """Find by description and click. The tree gives the exact rectangle; only
+    when it has no such control does a model's eye decide."""
+    eng = _engine()
+    el = _tree_find(description)
+    if el is not None and eng is not None:
+        act = eng.click(el, button=button, clicks=clicks)
+        if act.ok:
+            return f"Clicked '{description}' via the UI tree at {act.point}"
+        # a deliberate refusal (disabled control, own window...) is final
+        return _act_result(act, "")
+    xy = el.center if el is not None else _vision_find(description)
+    if not xy:
+        return outcome.failed("computer_control", f"'{description}' was not found on screen",
+                              hint="call screen_process to look, then retry with a more specific description")
+    time.sleep(0.15)
+    res = _click(x=xy[0], y=xy[1], button=button, clicks=clicks)
+    return f"{res} - '{description}' located by sight"
 
-        match = re.search(r"(\d+)\s*,\s*(\d+)", text)
-        if match:
-            return int(match.group(1)), int(match.group(2))
 
-    except Exception as e:
-        print(f"[ComputerControl] ⚠️ screen_find failed: {e}")
+def _list_controls(limit: int = 40) -> str:
+    """What can be clicked in the front window, by name - lets the model aim
+    without a picture."""
+    try:
+        from core import screenview
+        view = screenview.look()
+        els = [e for e in view.elements if e.interactable and e.label][:limit]
+        if not els:
+            return outcome.unverified("computer_control", "no readable controls here - use screen_process to look instead")
+        rows = [f"- {e.role}: {e.label[:60]} @ {e.center[0]},{e.center[1]}" for e in els]
+        return f"Front window: {view.app} - {view.title[:70]}\n" + "\n".join(rows)
+    except Exception as e:                       # noqa: BLE001
+        return outcome.unverified("computer_control", f"could not read controls: {e}")
 
-    return None
 
 def computer_control(
     parameters: dict,
@@ -569,14 +759,31 @@ def computer_control(
 
     try:
 
+        enter = bool(params.get("enter", False))
+
         if action == "type":
-            return _type(params.get("text", ""))
+            return _type(params.get("text", ""), enter=enter)
 
         if action == "smart_type":
             return _smart_type(
                 params.get("text", ""),
                 clear_first=params.get("clear_first", True),
+                enter=enter,
             )
+
+        if action == "type_into":
+            # click the described field, then type: one reliable step
+            desc = params.get("description", "")
+            clicked = _screen_click(desc)
+            if outcome.is_problem(clicked):
+                return clicked
+            time.sleep(0.25)
+            typed = _smart_type(params.get("text", ""),
+                                clear_first=params.get("clear_first", True), enter=enter)
+            return f"{clicked}; {typed}"
+
+        if action == "list_controls":
+            return _list_controls()
 
         if action in ("click", "left_click"):
             return _click(params.get("x"), params.get("y"), "left", 1)
@@ -602,7 +809,7 @@ def computer_control(
             return _hotkey(*keys)
 
         if action == "press":
-            return _press(params.get("key", "enter"))
+            return _press(params.get("key", "enter"), presses=int(params.get("presses", 1) or 1))
 
         if action == "scroll":
             return _scroll(
@@ -623,14 +830,11 @@ def computer_control(
             coords = _screen_find(params.get("description", ""))
             return f"{coords[0]},{coords[1]}" if coords else "NOT_FOUND"
 
-        if action == "screen_click":
-            desc   = params.get("description", "")
-            coords = _screen_find(desc)
-            if coords:
-                time.sleep(0.2)
-                _click(x=coords[0], y=coords[1])
-                return f"Clicked '{desc}' at {coords}"
-            return f"Element not found on screen: '{desc}'"
+        if action in ("screen_click", "screen_double_click", "screen_right_click"):
+            desc = params.get("description", "")
+            btn  = "right" if action == "screen_right_click" else "left"
+            n    = 2 if action == "screen_double_click" else 1
+            return _screen_click(desc, button=btn, clicks=n)
 
         if action == "wait":
             secs = float(params.get("seconds", 1.0))
@@ -678,6 +882,11 @@ TOOL = {
     "description": (
         "Direct computer control: type, click, hotkeys, scroll, move mouse, "
         "screenshots, find elements on screen, and CLOSE an application. "
+        "To click something you can see, use action='screen_click' with a short "
+        "specific 'description' - it reads the exact control from the UI tree and "
+        "only falls back to sight; NEVER invent x,y coordinates. To fill a field "
+        "use action='type_into' (description + text, enter=true to submit). "
+        "action='list_controls' names what is clickable in the front window. "
         "Use action='close_app' with 'app_name' whenever the user asks to "
         "close, quit or exit a program - 'close Spotify', 'quit Chrome'. "
         "Always name the application in 'app_name'; there is no action that "
@@ -698,7 +907,7 @@ TOOL = {
         "properties": {
             "action": {
                 "type": "STRING",
-                "description": "type | smart_type | click | double_click | right_click | hotkey | press | scroll | move | copy | paste | screenshot | wait | clear_field | focus_window | close_app | screen_find | screen_click | random_data | user_data"
+                "description": "type | smart_type | type_into | click | double_click | right_click | hotkey | press | scroll | move | drag | copy | paste | screenshot | wait | clear_field | focus_window | close_app | list_controls | screen_find | screen_click | screen_double_click | screen_right_click | random_data | user_data"
             },
             "app_name": {
                 "type": "STRING",
@@ -763,6 +972,14 @@ TOOL = {
             "field": {
                 "type": "STRING",
                 "description": "Field for user_data: name|email|city"
+            },
+            "enter": {
+                "type": "BOOLEAN",
+                "description": "For type / smart_type / type_into: press Enter after typing (search boxes, chat send)."
+            },
+            "presses": {
+                "type": "INTEGER",
+                "description": "For press: how many times to press the key (default 1)."
             },
             "clear_first": {
                 "type": "BOOLEAN",

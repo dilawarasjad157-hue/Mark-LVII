@@ -39,12 +39,17 @@ from gui.theme import (
     qcol,
 )
 
-from gui.style import blend, chamfer, px_font, with_alpha
+from gui.style import blend, chamfer, px_font, tint, with_alpha
 
 try:
     from gui.reactor import Reactor3D
 except Exception:      # pragma: no cover — the classic core still draws
     Reactor3D = None
+
+try:
+    from gui.jarvis_fx import JarvisFX
+except Exception:      # pragma: no cover — the cinematic layer is optional
+    JarvisFX = None
 
 
 class HudCanvas(QWidget):
@@ -85,8 +90,17 @@ class HudCanvas(QWidget):
             from memory.config_manager import get_hud_style
             self.hud_style = get_hud_style()
         except Exception:
-            self.hud_style = "face"
+            self.hud_style = "core"
         self._core_phase = 0.0
+
+        # The cinematic layer (gui/jarvis_fx.py): ring interface, telemetry,
+        # radar, scan lines. Purely cosmetic — any failure switches it off.
+        self._fx = None
+        if JarvisFX is not None:
+            try:
+                self._fx = JarvisFX()
+            except Exception:
+                self._fx = None
 
         self._tick       = 0
         self._scale      = 1.0
@@ -200,91 +214,56 @@ class HudCanvas(QWidget):
             self._live_amp = lv
 
     def _make_grid(self, W: int, H: int) -> QPixmap:
-        """Pre-render the static backdrop — atmosphere, workshop floor, bokeh
-        and the screen frame — once per size and theme, so paintEvent blits one
-        pixmap instead of redrawing a scene every frame.
+        """Pre-render the static backdrop once per size and theme, so paintEvent
+        blits one pixmap instead of redrawing a scene every frame.
 
-        The floor is a perspective grid receding to a horizon with two rows of
-        lights along it, after the workshop the HUD is modelled on; the bokeh
-        are out-of-focus lights, mostly cool with a few warm. The layout is
-        seeded, so it is the same scene on every launch."""
+        Black, as the monochrome scenes of the opening sequence are: a faint
+        cold light behind the centrepiece, one thin horizontal flare through
+        it, and the screen's own frame — a hairline border with lit corners
+        and a row of four small dots, like the readout boxes in the film.
+        Nothing else; the film is empty space and fine line, and so is this."""
         W, H = max(1, W), max(1, H)
         pm = QPixmap(W, H)
         pm.fill(qcol(C.BG))
         p = QPainter(pm)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         cx = W / 2
+        glow = tint()
 
-        g = QRadialGradient(cx, H * 0.42, max(W, H) * 0.62)
-        g.setColorAt(0.0, blend(C.PRI, 0.10))
-        g.setColorAt(0.55, blend(C.PRI, 0.035))
+        g = QRadialGradient(cx, H * 0.43, max(W, H) * 0.55)
+        g.setColorAt(0.0, blend(glow, 0.10))
+        g.setColorAt(0.45, blend(glow, 0.035))
         g.setColorAt(1.0, qcol(C.BG))
         p.fillRect(QRectF(0, 0, W, H), QBrush(g))
 
-        hy, vy = H * 0.70, H * 0.52
-        p.save()
-        p.setClipRect(QRectF(0, hy, W, H - hy))
-        for i in range(-14, 15):
-            x = cx + i * W * 0.11
-            p.setPen(QPen(blend(C.PRI, 0.10 * (1 - abs(i) / 16)), 1))
-            p.drawLine(QLineF(cx + (x - cx) * 0.05, vy, x, H))
-        y, step = hy, 5.0
-        while y < H:
-            k = (y - hy) / max(1.0, H - hy)
-            p.setPen(QPen(blend(C.PRI, 0.03 + 0.09 * k), 1))
-            p.drawLine(QLineF(0, y, W, y))
-            y += step
-            step *= 1.28
-        p.setPen(Qt.PenStyle.NoPen)
-        for side in (-1, 1):
-            for j in range(3, 12):
-                t = j / 11
-                x = cx + side * (W * 0.16 + t * t * W * 0.26)
-                yy = hy + (H - hy) * t * t
-                rr = (0.6 + 1.4 * t) * 3
-                gg = QRadialGradient(x, yy, rr)
-                gg.setColorAt(0.0, with_alpha(C.WHITE, 0.30 * (0.3 + t)))
-                gg.setColorAt(0.35, with_alpha(C.PRI, 0.12 * (0.3 + t)))
-                gg.setColorAt(1.0, with_alpha(C.PRI, 0.0))
-                p.setBrush(QBrush(gg))
-                p.drawEllipse(QPointF(x, yy), rr, rr)
-        p.restore()
-
+        # the flare of the intro, kept as one very faint line through the core
+        fy = H * 0.43
         lg = QLinearGradient(0, 0, W, 0)
-        lg.setColorAt(0.0, with_alpha(C.PRI, 0.0))
-        lg.setColorAt(0.5, with_alpha(C.PRI, 0.35))
-        lg.setColorAt(1.0, with_alpha(C.PRI, 0.0))
+        lg.setColorAt(0.0, with_alpha(glow, 0.0))
+        lg.setColorAt(0.5, with_alpha(glow, 0.14))
+        lg.setColorAt(1.0, with_alpha(glow, 0.0))
         p.setPen(QPen(QBrush(lg), 1))
-        p.drawLine(QLineF(0, hy, W, hy))
-
-        rnd = random.Random(57)
-        p.setPen(Qt.PenStyle.NoPen)
-        for _ in range(int(W * H / 9000)):
-            x, yy = rnd.uniform(0, W), rnd.uniform(0, H * 0.72)
-            rr = rnd.uniform(0.8, 3.2) * 3
-            warm = rnd.random() < 0.12
-            c = C.ACC2 if warm else (C.WHITE if rnd.random() < 0.3 else C.PRI)
-            a = rnd.uniform(0.08, 0.40)
-            gg = QRadialGradient(x, yy, rr)
-            gg.setColorAt(0.0, with_alpha(c, a))
-            gg.setColorAt(1.0, with_alpha(c, 0.0))
-            p.setBrush(QBrush(gg))
-            p.drawEllipse(QPointF(x, yy), rr, rr)
+        p.drawLine(QLineF(0, fy, W, fy))
 
         # the screen's edge: a thin chamfered frame with lit corners
         m, cut, arm = 6, 16, 46
         p.setBrush(Qt.BrushStyle.NoBrush)
-        p.setPen(QPen(blend(C.PRI, 0.20), 1))
+        p.setPen(QPen(blend(C.PRI, 0.16), 1))
         p.drawPolygon(chamfer(QRectF(m, m, W - 2 * m, H - 2 * m), cut, ("tl", "tr", "br", "bl")))
-        p.setPen(QPen(blend(C.PRI, 0.9), 1.8))
+        p.setPen(QPen(blend(C.PRI, 0.85), 1.6))
         for sx, sy in ((1, 1), (-1, 1), (1, -1), (-1, -1)):
             x0 = m if sx > 0 else W - m
             y0 = m if sy > 0 else H - m
             p.drawLine(QLineF(x0, y0 + sy * (cut + arm), x0, y0 + sy * cut))
             p.drawLine(QLineF(x0, y0 + sy * cut, x0 + sx * cut, y0))
+
+        # four small circles and the title — the header of the film's boxes
+        p.setPen(QPen(blend(C.PRI, 0.55), 1))
+        for i in range(4):
+            p.drawEllipse(QPointF(m + 30 + i * 11, m + 16), 3.2, 3.2)
         p.setFont(px_font(10, QFont.Weight.DemiBold, spacing=2.2))
         p.setPen(QPen(blend(C.PRI, 0.55)))
-        p.drawText(QRectF(m + 24, m + 8, 260, 16), Qt.AlignmentFlag.AlignVCenter, "VOICE INTERFACE")
+        p.drawText(QRectF(m + 86, m + 8, 260, 16), Qt.AlignmentFlag.AlignVCenter, "VOICE INTERFACE")
         p.end()
         return pm
 
@@ -335,6 +314,14 @@ class HudCanvas(QWidget):
         # a rate that changes with state jumps the rings the instant JARVIS
         # starts talking. Same lesson the head's sway taught.
         self._core_phase += min(0.10, max(0.0, dt))
+        if self._fx is not None:
+            try:
+                fx_rate = (0.3 if self.muted else
+                           1.0 + (1.9 if self.state in ("THINKING", "PROCESSING") else 0.0)
+                           + (1.2 if self.speaking else 0.0))
+                self._fx.step(dt, fx_rate)
+            except Exception:
+                self._fx = None
 
         if self._avatar is not None and self.hud_style == "face":
             self._avatar.step(dt, amp, speaking=self.speaking,
@@ -343,7 +330,7 @@ class HudCanvas(QWidget):
                               v_level=v_level, v_seq=v_seq,
                               v_hop=(sched[2] if sched is not None else 0.02))
         else:
-            if self._reactor is not None:
+            if self._reactor is not None and self._fx is None:
                 self._reactor.step(dt, self.speaking,
                                    self.state in ("THINKING", "PROCESSING"), self.muted)
             # Fallback core: slow "breathing" base target, lifted by the level.
@@ -388,7 +375,8 @@ class HudCanvas(QWidget):
         # either way because the animation state keeps stepping at 60 Hz.
         self._paint_tick = (self._paint_tick + 1) % 6
         active = (self.speaking or amp > 0.02
-                  or self.state in ("THINKING", "PROCESSING"))
+                  or self.state in ("THINKING", "PROCESSING")
+                  or (self._fx is not None and self._fx.booting))
         if _blinked or (self._paint_tick % 2 == 0 if active
                         else self._paint_tick % 3 == 0):
             # Nothing is on screen when the window is hidden or minimised, so
@@ -610,6 +598,32 @@ class HudCanvas(QWidget):
         band_t = 30.0
         band_h = max(60.0, sy - 14.0 - band_t)
 
+        face_mode = self._avatar is not None and self.hud_style == "face"
+        video_core = False
+        if self._fx is not None:
+            try:
+                if self.muted:
+                    fm = fa = qcol(C.MUTED_C)
+                else:
+                    fm = qcol(C.PRI)
+                    fa = (qcol(C.ACC) if self.speaking else
+                          qcol(C.ACC2) if self.state in ("THINKING", "PROCESSING") else
+                          qcol(C.GREEN) if self.state == "LISTENING" else qcol(C.PRI))
+                ring_R = self._fx.layout(W, band_h)
+                live_now = (self.speaking or self._amp_disp > 0.04) and not self.muted
+                if face_mode:
+                    self._fx.paint_rings(
+                        p, cx, band_t + band_h / 2.0, ring_R, fm, fa, self._amp_disp,
+                        live_now, full=True)
+                else:
+                    glow = qcol(C.MUTED_C) if self.muted else qcol(tint())
+                    self._fx.paint_core_video(
+                        p, cx, band_t + band_h / 2.0, ring_R, fm, fa, self._amp_disp,
+                        live_now, glow)
+                    video_core = True
+            except Exception:
+                self._fx = None
+
         if self._avatar is not None and self.hud_style == "face":
             r_head = min(fw * 0.355, band_h / (self._avatar.SPAN + 0.08))
             head_cy = band_t + (band_h - self._avatar.SPAN * r_head) / 2.0 + r_head
@@ -626,6 +640,8 @@ class HudCanvas(QWidget):
                 else:
                     acc = qcol(C.PRI)
             self._avatar.paint(p, cx, head_cy, r_head, main, acc, qcol(C.BG))
+        elif video_core:
+            pass            # the ring core above is the centrepiece
         elif self._reactor is not None:
             ext = Reactor3D.TOP + Reactor3D.BOTTOM
             r = min(W * 0.25, band_h / ext)
@@ -683,5 +699,17 @@ class HudCanvas(QWidget):
             w = max(1.5, bw - 2.0)
             p.fillRect(QRectF(x, wy - hgt, w, hgt), c)
             p.fillRect(QRectF(x, wy + 1.5, w, hgt * 0.45), blend(c, 0.30))
+
+        if self._fx is not None:
+            try:
+                fm = qcol(C.MUTED_C) if self.muted else qcol(C.PRI)
+                fa = qcol(C.MUTED_C) if self.muted else qcol(C.ACC)
+                self._fx.paint_telemetry(p, W, H, fm, fa, amp)
+                self._fx.paint_radar(p, W, H, fm, fa)
+                self._fx.paint_datalink(p, W, H, fm, fa)
+                self._fx.paint_tag(p, W, H, fm, fa, "MK", "// ENGINE", str(self.state))
+                self._fx.paint_glass(p, W, H, fm)
+            except Exception:
+                self._fx = None
 
         p.end()   # end deterministically so the backing store never flushes an active painter

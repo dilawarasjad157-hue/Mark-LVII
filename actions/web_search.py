@@ -63,6 +63,84 @@ def _run_bounded(fn, timeout: float, label: str = "task"):
         print(f"[WebSearch] {label} exceeded {timeout:.0f}s — moving on")
     return box[0]
 
+
+# ── Freshness helpers ─────────────────────────────────────────────────────────
+# A model's own memory is months old and a bare search query carries no date, so
+# "latest" quietly meant "whatever ranked best". Every search now states today's
+# date, asks for the newest sources, and the DDG path asks for the last day or
+# week first — widening only when nothing recent exists.
+from datetime import datetime
+
+_RECENT_WORDS = (
+    "latest", "today", "tonight", "now", "current", "currently", "recent",
+    "news", "breaking", "update", "score", "live", "price", "rate", "weather",
+    "yesterday", "this week", "this month", "result", "results", "who is",
+    "release", "launched", "announced", "new ",
+)
+
+
+def _today() -> str:
+    return datetime.now().strftime("%A, %d %B %Y")
+
+
+def _wants_recent(query: str) -> bool:
+    q = (query or "").lower()
+    return any(w in q for w in _RECENT_WORDS) or str(datetime.now().year) in q
+
+
+def _fresh_prompt(query: str) -> str:
+    """The query, wrapped so grounded search answers with the newest facts."""
+    return (
+        f"Today is {_today()}. {query}\n\n"
+        "Use Google Search and answer from the NEWEST sources you can find — "
+        "prefer pages from the last few days. Do not answer from memory. "
+        "State the date of each fact you report, give exact figures, and if "
+        "sources disagree or the information may have changed, say so."
+    )
+
+
+def _page_text(url: str, limit: int = 1400, timeout: float = 4.0) -> str:
+    """Readable body text of an article, or '' — never raises, never slow."""
+    if not url or not url.startswith("http"):
+        return ""
+    try:
+        import requests
+        from bs4 import BeautifulSoup
+        r = requests.get(
+            url, timeout=timeout,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                   "AppleWebKit/537.36 Chrome/124 Safari/537.36"},
+        )
+        if r.status_code != 200 or "html" not in r.headers.get("content-type", ""):
+            return ""
+        soup = BeautifulSoup(r.text, "html.parser")
+        for tag in soup(["script", "style", "nav", "footer", "header", "aside", "form"]):
+            tag.decompose()
+        paras = [p.get_text(" ", strip=True) for p in soup.find_all("p")]
+        text = " ".join(p for p in paras if len(p) > 60)
+        return text[:limit].strip()
+    except Exception:
+        return ""
+
+
+def _enrich(results: list[dict], top: int = 3) -> list[dict]:
+    """Fetch the first few articles IN PARALLEL and attach their text."""
+    targets = [r for r in results[:top] if r.get("url")]
+    if not targets:
+        return results
+
+    def _one(r):
+        r["body"] = _page_text(r["url"])
+
+    threads = [threading.Thread(target=_one, args=(r,), daemon=True) for r in targets]
+    for t in threads:
+        t.start()
+    deadline = time.monotonic() + 5.0
+    for t in threads:
+        t.join(max(0.0, deadline - time.monotonic()))
+    return results
+
+
 def _get_base_dir() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).parent
@@ -87,7 +165,7 @@ def _gemini_search(query: str) -> str:
     # Grounded search reads a live page, so it gets a longer deadline than the
     # default — but it still HAS one, and it still walks the fallback ladder.
     try:
-        response = gemini.call(query, tier=gemini.SEARCH,
+        response = gemini.call(_fresh_prompt(query), tier=gemini.SEARCH,
                                config={"tools": [{"google_search": {}}]},
                                timeout_ms=30_000)
         if response is None:
@@ -130,16 +208,24 @@ def _get_ddgs():
 def _ddg_search(query: str, max_results: int = 6) -> list[dict]:
     DDGS = _get_ddgs()
     results = []
-    try:
-        with DDGS() as ddgs:
-            for r in ddgs.text(query, max_results=max_results):
-                results.append({
-                    "title":   r.get("title",  ""),
-                    "snippet": r.get("body",   ""),
-                    "url":     r.get("href",   ""),
-                })
-    except Exception as e:
-        print(f"[WebSearch] ⚠️ DDG text() failed: {e}")
+    # Time-sensitive questions ask for the last month first, then anything.
+    limits = ("m", None) if _wants_recent(query) else (None,)
+    for limit in limits:
+        try:
+            with DDGS() as ddgs:
+                kw = {"max_results": max_results}
+                if limit:
+                    kw["timelimit"] = limit
+                for r in ddgs.text(query, **kw):
+                    results.append({
+                        "title":   r.get("title",  ""),
+                        "snippet": r.get("body",   ""),
+                        "url":     r.get("href",   ""),
+                    })
+        except Exception as e:
+            print(f"[WebSearch] ⚠️ DDG text() failed: {e}")
+        if results:
+            break
     return results
 
 
@@ -147,17 +233,31 @@ def _ddg_news(query: str, max_results: int = 8) -> list[dict]:
     """DDG news search — returns actual articles, not website homepages."""
     DDGS = _get_ddgs()
     results = []
-    try:
-        with DDGS() as ddgs:
-            for r in ddgs.news(query, max_results=max_results):
-                results.append({
-                    "title":   r.get("title",  ""),
-                    "snippet": r.get("body",   ""),
-                    "url":     r.get("url",    ""),
-                    "source":  r.get("source", ""),
-                })
-    except Exception as e:
-        print(f"[WebSearch] ⚠️ DDG news() failed ({e}) — falling back to text search")
+    # Newest first: the last day, then the last week, then the last month.
+    for limit in ("d", "w", "m"):
+        try:
+            with DDGS() as ddgs:
+                for r in ddgs.news(query, max_results=max_results, timelimit=limit):
+                    results.append({
+                        "title":   r.get("title",  ""),
+                        "snippet": r.get("body",   ""),
+                        "url":     r.get("url",    ""),
+                        "source":  r.get("source", ""),
+                        "date":    str(r.get("date", ""))[:16].replace("T", " "),
+                    })
+        except Exception as e:
+            print(f"[WebSearch] ⚠️ DDG news({limit}) failed ({e})")
+        # Widen the window only when the narrower one came back thin; the wider
+        # window repeats the narrower one's items, so de-duplicate by link.
+        seen, unique = set(), []
+        for r in results:
+            key = r.get("url") or r.get("title")
+            if key not in seen:
+                seen.add(key)
+                unique.append(r)
+        results = unique
+        if len(results) >= 3:
+            break
     # Also covers the legacy-package case, where news() returns an empty list
     # instead of raising.
     if not results:
@@ -169,10 +269,11 @@ def _format_ddg(query: str, results: list[dict]) -> str:
     if not results:
         return f"No results found for: {query}"
 
-    lines = [f"Search results for: {query}\n"]
+    lines = [f"Search results (as of {_today()}) for: {query}\n"]
     for i, r in enumerate(results, 1):
         if r.get("title"):   lines.append(f"{i}. {r['title']}")
-        if r.get("snippet"): lines.append(f"   {r['snippet']}")
+        if r.get("body"):    lines.append(f"   {r['body']}")
+        elif r.get("snippet"): lines.append(f"   {r['snippet']}")
         if r.get("url"):     lines.append(f"   Source: {r['url']}")
         lines.append("")
     return "\n".join(lines).strip()
@@ -182,15 +283,18 @@ def _format_news(query: str, results: list[dict]) -> str:
     if not results:
         return f"No news found for: {query}"
 
-    lines = [f"Latest news: {query}\n"]
+    lines = [f"Latest news as of {_today()}: {query}\n"]
     for i, r in enumerate(results, 1):
         title = r.get("title", "")
         if not title:
             continue
         src = f"  [{r['source']}]" if r.get("source") else ""
-        lines.append(f"{i}. {title}{src}")
-        if r.get("snippet"):
-            lines.append(f"   {r['snippet'][:140]}")
+        when = f"  ({r['date']})" if r.get("date") else ""
+        lines.append(f"{i}. {title}{src}{when}")
+        if r.get("body"):
+            lines.append(f"   {r['body']}")
+        elif r.get("snippet"):
+            lines.append(f"   {r['snippet'][:240]}")
         if r.get("url"):
             lines.append(f"   {r['url']}")
         lines.append("")
@@ -209,7 +313,7 @@ def _gemini_headlines(n: int = 5) -> tuple[list[str], str]:
     from core import gemini
 
     response = gemini.call(
-        f"Current world news: {n} headlines. Numbered list, titles only.",
+        f"Today is {_today()}. Current world news right now: {n} headlines from the last 24 hours. Numbered list, titles only.",
         tier=gemini.SEARCH,
         config={"tools": [{"google_search": {}}]},
         timeout_ms=30_000,
@@ -247,6 +351,8 @@ def _search(query: str) -> str:
     except Exception as e:
         _log_gemini_failure("Gemini search", e)
         results = _ddg_search(query)
+        if _wants_recent(query):
+            results = _enrich(results, top=2)
         return _format_ddg(query, results)
 
 
@@ -269,14 +375,15 @@ def _news(query: str) -> str:
     ddg_query    = query if query else "world news today"
 
     def _ddg_attempt() -> str:
-        return _format_news(ddg_query, _ddg_news(ddg_query, max_results=8))
+        items = _enrich(_ddg_news(ddg_query, max_results=8), top=3)
+        return _format_news(ddg_query, items)
 
-    text = _run_bounded(_ddg_attempt, timeout=5.0, label="DDG news")
+    text = _run_bounded(_ddg_attempt, timeout=11.0, label="DDG news")
     if text and len(text) > 60 and not text.startswith("No news found"):
         return text
 
     text = _run_bounded(
-        lambda: _gemini_search(gemini_query), timeout=6.0, label="Gemini news"
+        lambda: _gemini_search(gemini_query), timeout=25.0, label="Gemini news"
     )
     if text and len(text) > 60:
         return text
@@ -402,7 +509,7 @@ def web_search(
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "web_search",
-    "description": "Searches the web. Use for ANY question about current facts, events, prices, or topics — always prefer this over guessing. Modes: 'search' (default), 'news' (latest headlines on a topic), 'research' (deep comprehensive answer), 'price' (product cost lookup), 'compare' (side-by-side comparison of items).",
+    "description": "Searches the live web and returns today's information. You MUST call this for anything that can change: news, sports scores, prices, exchange rates, weather, who holds a job, releases, laws, 'latest', 'today', 'now', 'current' — and whenever you are not sure. Your own memory is months old; never answer such questions from it. Modes: 'search' (default), 'news' (latest headlines on a topic), 'research' (deep comprehensive answer), 'price' (product cost lookup), 'compare' (side-by-side comparison of items).",
     "parameters": {
         "type": "OBJECT",
         "properties": {

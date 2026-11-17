@@ -155,7 +155,7 @@ class ProvidersOverlay(_HudOverlay):
         outer.setContentsMargins(22, 18, 22, 18)
         outer.setSpacing(10)
 
-        title = QLabel("🔌  ENGINE  &  PROVIDERS")
+        title = QLabel("ENGINE  &  PROVIDERS")
         title.setFont(hud_font(13, QFont.Weight.Bold))
         title.setStyleSheet(f"color: {C.PRI}; background: transparent;")
         outer.addWidget(title)
@@ -827,7 +827,7 @@ class ProvidersOverlay(_HudOverlay):
         QTimer.singleShot(0, self._rebuild_body)
 
     def _sidecar_box_widget(self) -> QWidget:
-        head = self._label("⚡  BACKGROUND REQUESTS", 9, C.PRI, bold=True)
+        head = self._label("BACKGROUND REQUESTS", 9, C.PRI, bold=True)
         w, lay = self._box([head])
         lay.addWidget(self._label(
             "Reading a document, looking at your screen, writing code — the "
@@ -882,7 +882,7 @@ class ProvidersOverlay(_HudOverlay):
         whole source file at a time. Whatever is picked is tried FIRST for code,
         with Gemini behind it, so a service having a bad day still produces a
         project instead of nothing."""
-        head = self._label("🛠  CODING", 9, C.PRI, bold=True)
+        head = self._label("CODING", 9, C.PRI, bold=True)
         w, lay = self._box([head])
         lay.addWidget(self._label(
             "The model that plans, writes and fixes projects when you ask the "

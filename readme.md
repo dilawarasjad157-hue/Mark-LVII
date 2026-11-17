@@ -1016,3 +1016,47 @@ Licensed under **[Creative Commons BY-NC 4.0](https://creativecommons.org/licens
 ## 👤 Owner
 
 Set up and customized by **Dilawar**.
+
+---
+
+## 🆕 Update — accuracy, freshness and new skills
+
+| Area | What changed |
+|---|---|
+| 🌐 Fresh answers | `web_search` now stamps today's date on every query, asks for the newest sources, widens day → week → month on DDG news, reads the top articles' full text, and waits long enough for grounded Gemini search. `prompt.txt` has a `[FRESHNESS]` rule: anything that can change is searched, never answered from memory. |
+| 🖱️ Mouse & keyboard | `computer_control` now clicks through `core/screenact` (exact control from the UI tree, own-window guard, layout-independent typing). Vision fallback uses Gemini's 0-1000 grid plus a zoomed second pass. New actions: `type_into`, `list_controls`, `screen_double_click`, `screen_right_click`, `enter=true`. Failed calls are retried by the model up to 3 times instead of giving up. |
+| 💱 `currency_converter` | Live rates — "100 dollar kitne rupay". |
+| 📝 `quick_notes` | Voice notes + to-do list that survive restarts. |
+| ⏱️ `focus_timer` | Countdown and Pomodoro; speaks when a block ends. |
+| 📋 `clipboard_ai` | Summarise / translate / fix / explain / reply to whatever you just copied. |
+| 🧹 `system_cleanup` | Disk space report and safe temp-file cleanup. |
+| 📶 `net_check` | Latency, download speed and public IP. |
+
+---
+
+## 🎬 Cinematic HUD layer (`gui/jarvis_fx.py`)
+
+Concentric graduated rings with bearings, segmented bands and counter-rotating
+arcs behind the centrepiece, a boot sequence, a scanner sweep, a spectrum ring
+driven by the real audio level, live clock/CPU/memory/battery/network telemetry,
+edge rulers (left = CPU load, right = voice level), a radar and a data link in
+the lower corners, and a glass finish (scan lines, light sweep, vignette).
+Cosmetic only: if anything in it raises, `HudCanvas` switches it off and the
+previous HUD keeps drawing. To remove it, delete the file.
+
+### 🎞 Opening sequence
+
+`assets/boot_intro.mp4` plays over the window at start-up (picture and sound),
+then fades into the HUD, whose rings run their own start-up animation. Click,
+Esc or Space skips it. The microphone is muted while it plays. Turn it off with
+`"boot_intro": false` in `config/api_keys.json`, or set `JARVIS_NO_INTRO=1`.
+For the monochrome look of the second half of the intro, pick a near-white
+accent colour in the customise panel.
+
+### 🎨 Default look
+
+Black glass, white-grey linework and a cold teal accent, after the monochrome
+half of the opening sequence; panel headers are boxed with a two-letter
+monogram cell. Pick any other accent colour in the customise panel and the
+original cyan-derived palette is used for it. A saved `"ui_color": "#00d4ff"`
+in `config/api_keys.json` keeps the old all-cyan look.
