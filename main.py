@@ -2235,6 +2235,14 @@ class JarvisLive:
                     shown on the UI content panel. Waits for turn_complete event
                     instead of a fixed sleep so there is no unnecessary gap.
         """
+        # Wait for the boot-intro video to finish before greeting, so the
+        # greeting does not talk over the intro soundtrack.
+        for _ in range(120):
+            _intro = getattr(self.ui, "_intro", None)
+            if _intro is None or getattr(_intro, "_done", True):
+                break
+            await asyncio.sleep(0.5)
+
         memory   = load_memory()
         identity = memory.get("identity", {})
 
